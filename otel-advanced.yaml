@@ -1,0 +1,124 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: otelcol
+  namespace: opentelemetry-operator-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: otelcol
+rules:
+  - apiGroups:
+      - monitoring.coreos.com
+    resources:
+      - servicemonitors
+      - podmonitors
+    verbs:
+      - '*'
+  - apiGroups: ['']
+    resources:
+      - namespaces
+    verbs: ['get', 'list', 'watch']
+  - apiGroups: ['']
+    resources:
+      - nodes
+      - nodes/metrics
+      - services
+      - endpoints
+      - pods
+    verbs: ['get', 'list', 'watch']
+  - apiGroups: ['']
+    resources:
+      - configmaps
+    verbs: ['get']
+  - apiGroups:
+      - discovery.k8s.io
+    resources:
+      - endpointslices
+    verbs: ['get', 'list', 'watch']
+  - apiGroups:
+      - networking.k8s.io
+    resources:
+      - ingresses
+    verbs: ['get', 'list', 'watch']
+  - nonResourceURLs: ['/metrics']
+    verbs: ['get']
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: otelcol
+subjects:
+  - kind: ServiceAccount
+    name: otelcol
+    namespace: opentelemetry-operator-system
+roleRef:
+  kind: ClusterRole
+  name: otelcol
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: openobservekey
+  namespace: opentelemetry-operator-system
+type: Opaque
+data:
+  token: TODO_YOUR_VALUE_HERE
+---
+apiVersion: opentelemetry.io/v1beta1
+kind: OpenTelemetryCollector
+metadata:
+  name: otelcol
+  namespace: opentelemetry-operator-system
+spec:
+  env:
+    - name: OPEN_OBSERVE_KEY
+      valueFrom:
+        secretKeyRef:
+          name: openobservekey
+          key: token
+  mode: statefulset
+  targetAllocator:
+    enabled: true
+    serviceAccount: otelcol
+    prometheusCR:
+      enabled: true
+      podMonitorSelector: {}
+      serviceMonitorSelector: {}
+  config:
+    receivers:
+      prometheus:
+        config:
+          scrape_configs:
+            - job_name: opentelemetry-collector
+              scrape_interval: 10s
+              static_configs:
+               - targets:
+                 - 127.0.0.1:8888
+  
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_percentage: 75
+        spike_limit_percentage: 15
+      batch:
+        send_batch_size: 1000
+        timeout: 5s
+
+    exporters:
+      debug:
+        verbosity: detailed
+      otlphttp/openobserve:
+        endpoint: http://host.docker.internal:5080/api/default
+        headers:
+          Authorization: ${env:OPEN_OBSERVE_KEY}
+          stream-name: default
+
+    service:
+      pipelines:
+        metrics:
+          receivers: [prometheus]
+          processors: [memory_limiter, batch]
+          exporters: [debug, otlphttp/openobserve]
