@@ -1,0 +1,97 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: otelcol
+  namespace: opentelemetry-operator-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: otelcol
+rules:
+- apiGroups: [""]
+  resources:
+  - nodes
+  - services
+  - endpoints
+  - pods
+  verbs: ["get", "list", "watch"]
+- apiGroups:
+  - extensions
+  resources:
+  - ingresses
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: otelcol
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: otelcol
+subjects:
+- kind: ServiceAccount
+  name: otelcol
+  namespace: opentelemetry-operator-system
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: openobservekey
+  namespace: opentelemetry-operator-system
+type: Opaque
+data:
+  token: TODO_YOUR_VALUE_HERE
+---
+apiVersion: opentelemetry.io/v1beta1
+kind: OpenTelemetryCollector
+metadata:
+  name: otelcol
+  namespace: opentelemetry-operator-system
+spec:
+  serviceAccount: otelcol
+  env:
+    - name: OPEN_OBSERVE_KEY
+      valueFrom:
+        secretKeyRef:
+          name: openobservekey
+          key: token
+  config:
+    receivers:
+      prometheus:
+        config:
+          scrape_configs:
+            - job_name: 'cert-manager'
+              scrape_interval: 5s
+              metrics_path: /metrics
+              kubernetes_sd_configs:
+                - role: service
+              relabel_configs:
+                - source_labels: [__meta_kubernetes_service_label_app]
+                  action: keep
+                  regex: (cainjector|cert-manager|webhook)
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_percentage: 75
+        spike_limit_percentage: 15
+      batch:
+        send_batch_size: 1000
+        timeout: 5s
+
+    exporters:
+      debug:
+        verbosity: detailed
+      otlphttp/openobserve:
+        endpoint: http://host.docker.internal:5080/api/default
+        headers:
+          Authorization: ${env:OPEN_OBSERVE_KEY}
+          stream-name: default
+
+    service:
+      pipelines:
+        metrics:
+          receivers: [prometheus]
+          processors: [memory_limiter, batch]
+          exporters: [otlphttp/openobserve]
