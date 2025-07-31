@@ -1,6 +1,6 @@
 # k8s-target-allocator
 
-This is the companion repo to [this video (coming soon)](https://example.com).
+This is the companion repo to [this video](https://youtu.be/E2it0kj7SfI).
 
 In the video I use [Headlamp](https://headlamp.dev). It's a great local cluster viewer from the CNCF.
 
